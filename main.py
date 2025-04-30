@@ -12,7 +12,6 @@ screen = pygame.display.set_mode((800, 600))
 background = pygame.image.load("bg.jpg")
 bgY = 0
 bgY2 = -600
-bg_speed = 0.25
 
 # Title and Icon
 pygame.display.set_caption("Space Invaders")
@@ -59,7 +58,7 @@ def spawn_enemy(existing_positions):
         return {
             'baseX': baseX,
             'Y': random.randint(-150, -50),
-            'Y_change': random.uniform(0.2, 0.4),  # faster descent
+            'Y_change': 0.0,  # faster descent
             'visible': True,
             'bulletX': None,
             'bulletY': None,
@@ -88,18 +87,40 @@ def spawn_enemy(existing_positions):
     return create_enemy(fallbackX)
 
 
+def show_score(x, y, score):
+    text = font.render(f"Score: {score}", True, (255, 255, 0))
+    screen.blit(text, (x, y))
+
+
 def show_lives(x, y, lives):
     text = font.render(f"Lives: {lives}", True, (255, 255, 255))
     screen.blit(text, (x, y))
 
 
-def game_over():
+def game_over(score):
     screen.fill((0, 0, 0))
     over_font = pygame.font.Font(None, 64)
+    small_font = pygame.font.Font(None, 36)
+
     game_over_text = over_font.render("GAME OVER", True, (255, 0, 0))
-    screen.blit(game_over_text, (250, 250))
+    score_text = small_font.render(f"Final Score: {score}", True, (255, 255, 255))
+    restart_text = small_font.render("Press R to Restart or Q to Quit", True, (200, 200, 200))
+
+    screen.blit(game_over_text, (260, 220))
+    screen.blit(score_text, (320, 280))
+    screen.blit(restart_text, (220, 520))
+
     pygame.display.update()
-    pygame.time.wait(3000)
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return 'quit'
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    return 'restart'
+                elif event.key == pygame.K_q:
+                    return 'quit'
 
 
 def main():
@@ -112,8 +133,13 @@ def main():
     bulletX, bulletY = 0, 480
     bulletY_change = 0.3
     bullet_state = "ready"
+    player_speed = 0.2
+    bg_speed = 0.1
+    bg_speed_max = 0.4
 
     lives = 5
+    score = 0
+    start_time = pygame.time.get_ticks()
 
     running = True
     while running:
@@ -131,9 +157,9 @@ def main():
         playerX_change = 0
 
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            playerX_change += 0.25
+            playerX_change += player_speed
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            playerX_change -= 0.25
+            playerX_change -= player_speed
 
         playerX += playerX_change
         playerX = max(0, min(playerX, 745))
@@ -150,6 +176,11 @@ def main():
 
         time_now = pygame.time.get_ticks()
 
+        time_elapsed = time_now - start_time
+        bg_speed = min(bg_speed_max, 0.1 + (time_elapsed / 100000))  # Increase slowly every ~100s
+        for enemy_data in enemies:
+            enemy_data['Y_change'] = bg_speed * random.uniform(1.2, 1.6)
+
         for i, enemy_data in enumerate(enemies):
             if enemy_data['visible']:
                 wave = enemy_data['osc_amplitude'] * math.sin(enemy_data['osc_freq'] * time_now + enemy_data['osc_time_offset'])
@@ -164,6 +195,11 @@ def main():
                 if bullet_state == "fire" and isCollision(enemyX, enemyY, bulletX, bulletY):
                     bulletY = 480
                     bullet_state = "ready"
+                    if enemyY < 300:
+                        score += 150  # Perfect shot bonus
+                    else:
+                        score += 100  # Regular enemy kill
+
                     enemies[i] = spawn_enemy([e['baseX'] for e in enemies if e['visible']])
                     continue
 
@@ -172,8 +208,7 @@ def main():
                     print(f"Player crashed! Lives left: {lives}")
                     enemies[i] = spawn_enemy([e['baseX'] for e in enemies if e['visible']])
                     if lives <= 0:
-                        running = False
-                    continue
+                        return score
 
                 for j, other in enumerate(enemies):
                     if i != j and other['visible']:
@@ -181,6 +216,7 @@ def main():
                         otherY = other['Y']
                         if isCollision(enemyX, enemyY, otherX, otherY, threshold=40):
                             print(f"Enemy {i} and Enemy {j} crashed!")
+                            score += 200  # Chain Kill Bonus
                             enemies[i] = spawn_enemy([e['baseX'] for e in enemies if e['visible']])
                             enemies[j] = spawn_enemy([e['baseX'] for e in enemies if e['visible']])
                             break
@@ -196,18 +232,29 @@ def main():
                     enemy_data['last_shot'] = current_time
 
                 if enemy_data['bullet_active']:
-                    enemy_data['bulletY'] += 0.45
+                    enemy_data['bulletY'] += bg_speed * 1.75
                     fire_enemy_bullet(enemy_data['bulletX'], enemy_data['bulletY'])
 
                     if isCollision(enemy_data['bulletX'], enemy_data['bulletY'], playerX, playerY, threshold=30):
                         lives -= 1
-                        print(f"Player hit by bullet! Lives left: {lives}")
+                        print(f"Player hit. Lives left: {lives}")
                         enemy_data['bullet_active'] = False
+                        enemy_data.pop('dodge_given', None)  # Clear near-miss flag
                         if lives <= 0:
-                            running = False
+                            return score
+                    else:
+                        dist = math.sqrt((enemy_data['bulletX'] - playerX) ** 2 + (enemy_data['bulletY'] - playerY) ** 2)
+                        if 50 < dist < 80:
+                            if 'dodge_given' not in enemy_data:
+                                score += 5  # Near miss bonus!
+                                print("Dodge bonus!")
+                                enemy_data['dodge_given'] = True
+                        elif dist >= 80:
+                            enemy_data.pop('dodge_given', None)  # Reset if bullet moves away
 
                     if enemy_data['bulletY'] > 600:
                         enemy_data['bullet_active'] = False
+                        enemy_data.pop('dodge_given', None)
 
                 enemy(enemyX, enemyY)
 
@@ -221,9 +268,17 @@ def main():
 
         player(playerX, playerY)
         show_lives(10, 10, lives)
+        show_score(700, 10, score)
         pygame.display.update()
+
+    return score
 
 
 if __name__ == "__main__":
-    main()
-    game_over()
+    while True:
+        final_score = main()
+        action = game_over(final_score)
+
+        if action == 'quit':
+            pygame.quit()
+            break
