@@ -63,6 +63,7 @@ def spawn_enemy(existing_positions):
             'bulletX': None,
             'bulletY': None,
             'bullet_active': False,
+            'pattern': random.choice([0, 1, 2]),
             'x_drift': random.uniform(-0.2, 0.2),
             'target_offset': random.randint(-100, 100),
             'osc_amplitude': random.randint(10, 30),
@@ -183,8 +184,36 @@ def main():
 
         for i, enemy_data in enumerate(enemies):
             if enemy_data['visible']:
-                wave = enemy_data['osc_amplitude'] * math.sin(enemy_data['osc_freq'] * time_now + enemy_data['osc_time_offset'])
-                enemyX = enemy_data['baseX'] + wave
+                if enemy_data['pattern'] == 0 and enemy_data['Y'] < 300:
+                    if 'drift_timer' not in enemy_data:
+                        enemy_data['drift_timer'] = random.randint(500, 1500)
+                    if time_now > enemy_data.get('next_drift_time', 0):
+                        delta = playerX - enemy_data['baseX']
+                        shift = max(-0.4, min(0.4, delta * 0.002))  # subtle movement only
+                        enemy_data['baseX'] += shift
+                        enemy_data['next_drift_time'] = time_now + enemy_data['drift_timer']
+
+                pattern = enemy_data['pattern']
+                if pattern == 0:
+                    # Standard wave
+                    offset = enemy_data['osc_amplitude'] * math.sin(
+                        enemy_data['osc_freq'] * time_now + enemy_data['osc_time_offset'])
+                    enemyX = enemy_data['baseX'] + offset
+
+                elif pattern == 1:
+                    # Zigzag
+                    zigzag_speed = 0.008
+                    zigzag_amplitude = 40
+                    offset = zigzag_amplitude * math.sin(zigzag_speed * time_now + enemy_data['osc_time_offset'])
+                    enemyX = enemy_data['baseX'] + offset
+
+                elif pattern == 2:
+                    # Dive bomb with side shift
+                    if 'shift' not in enemy_data:
+                        enemy_data['shift'] = random.choice([-1, 1]) * random.randint(20, 100)
+                    offset = (enemy_data['Y'] / 600) * enemy_data['shift']  # more shift as they fall
+                    enemyX = enemy_data['baseX'] + offset
+
                 enemyY = enemy_data['Y']
                 enemy_data['Y'] += enemy_data['Y_change']
 
